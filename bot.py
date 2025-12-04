@@ -190,6 +190,7 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
             f"📲 *收到短信*\n"
             f"ID: `{msg.get('id')}`\n"
             f"号码: {msg.get('number')}\n"
+            f"接收号码: {msg.get('simnum')}\n"
             f"时间: {msg.get('time')}\n"
             f"内容: {content}"
         )
