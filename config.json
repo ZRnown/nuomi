@@ -1,0 +1,14 @@
+{
+  "sms_tokens": [
+    "cYxPNDG8ePDviFN6exuS8L",
+    "dwdwd"
+  ],
+  "active_sms_token": "dwdwd",
+  "target_chat_id": -1003105654627,
+  "keywords": [
+    "豆包"
+  ],
+  "last_seen_id": 31362,
+  "poll_interval": 5,
+  "forwarding_enabled": true
+}
