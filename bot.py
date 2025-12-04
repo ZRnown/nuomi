@@ -37,6 +37,13 @@ SMS_API_BASE = "http://sms.szfangmm.com:3000/api/smslist"
 CONFIG_PATH = Path("config.json")
 POLL_JOB_NAME = "sms_poll_job"
 
+_admin_raw = os.getenv("ADMIN_USER_IDS") or os.getenv("ADMIN_USER_ID") or ""
+ADMIN_USER_IDS = {
+    int(part.strip())
+    for part in _admin_raw.split(",")
+    if part.strip().isdigit()
+}
+
 MAIN_MENU = [
     ["➕ 添加短信 Token", "🔄 切换短信 Token"],
     ["🗑 删除短信 Token"],
@@ -123,6 +130,15 @@ def create_http_session() -> requests.Session:
 HTTP_SESSION = create_http_session()
 
 
+def is_authorized(update: Update) -> bool:
+    if not ADMIN_USER_IDS:
+        return True
+    user = update.effective_user
+    if not user:
+        return False
+    return user.id in ADMIN_USER_IDS
+
+
 def fetch_sms(sms_token: str) -> List[Dict[str, Any]]:
     url = f"{SMS_API_BASE}?token={sms_token}"
     response = HTTP_SESSION.get(url, headers=build_headers(), timeout=5, verify=False)
@@ -199,6 +215,11 @@ def return_menu_markup() -> ReplyKeyboardMarkup:
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        chat = update.effective_chat
+        if chat:
+            await chat.send_message("无权限使用此机器人。")
+        return
     context.user_data.clear()
     text = (
         "欢迎使用短信转发机器人 ✉️\n"
@@ -209,6 +230,12 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
+        return
+
+    if not is_authorized(update):
+        chat = update.effective_chat
+        if chat:
+            await chat.send_message("无权限使用此机器人。")
         return
 
     text = update.message.text.strip()

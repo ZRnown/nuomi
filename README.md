@@ -27,6 +27,7 @@ Python 实现的 Telegram 机器人，会定时访问 `http://sms.szfangmm.com:3
    ```bash
    cp env.template .env
    # 打开 .env 填写 TELEGRAM_BOT_TOKEN=xxxx:yyyy
+   # 可选：填写 ADMIN_USER_ID=你的 Telegram 数字 user id（或 ADMIN_USER_IDS=id1,id2）
    ```
 
 3. 启动机器人
@@ -43,4 +44,5 @@ Python 实现的 Telegram 机器人，会定时访问 `http://sms.szfangmm.com:3
 - `.env` 仅存放本地敏感信息，请勿提交到版本库。
 - 目标 chat id 获取方式：把机器人加入目标群组并发送任意消息，然后访问 `https://api.telegram.org/bot<token>/getUpdates` 查到 `chat.id`，或使用 @RawDataBot。
 - 机器人需要持续运行才能转发，可以托管在服务器并使用 `pm2` / `systemd` 等守护。
+
 # nuomi
