@@ -262,9 +262,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if handler:
         await handler(update, context)
     else:
-        await update.message.reply_text(
-            "请使用键盘中的按钮进行操作。", reply_markup=main_menu_markup()
-        )
+        # 如果用户发送的不是键盘按钮，自动显示菜单（相当于自动执行 /start）
+        await handle_start(update, context)
 
 
 async def resolve_chat_id(bot, value: str) -> int:
