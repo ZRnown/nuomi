@@ -96,13 +96,12 @@ class BotState:
             return BotConfig(**asdict(self.config))
 
 
-def build_headers() -> Dict[str, str]:
+def build_headers(sms_token: str) -> Dict[str, str]:
     return {
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-HK,zh-CN;q=0.9,zh;q=0.8,en-US;q=0.7,en;q=0.6",
         "Connection": "keep-alive",
-        "If-None-Match": '"xvuhd1kkf0c4"',
-        "Referer": "http://sms.szfangmm.com:3000/cYxPNDG8ePDviFN6exuS8L",
+        "Referer": f"http://sms.szfangmm.com:3000/{sms_token}",
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -141,7 +140,7 @@ def is_authorized(update: Update) -> bool:
 
 def fetch_sms(sms_token: str) -> List[Dict[str, Any]]:
     url = f"{SMS_API_BASE}?token={sms_token}"
-    response = HTTP_SESSION.get(url, headers=build_headers(), timeout=5, verify=False)
+    response = HTTP_SESSION.get(url, headers=build_headers(sms_token), timeout=5, verify=False)
     response.raise_for_status()
     data = response.json()
     if not isinstance(data, list):
@@ -153,11 +152,19 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
     state: BotState = context.application.bot_data["bot_state"]
     config = await state.read()
 
-    if not (config.forwarding_enabled and config.active_sms_token and config.target_chat_id):
+    if not config.forwarding_enabled:
+        LOG.info("转发未启用，跳过轮询")
+        return
+    if not config.active_sms_token:
+        LOG.info("未设置 active_sms_token，跳过轮询")
+        return
+    if not config.target_chat_id:
+        LOG.info("未设置 target_chat_id，跳过轮询")
         return
 
     try:
         messages = await asyncio.to_thread(fetch_sms, config.active_sms_token)
+        LOG.info("获取到 %d 条短信", len(messages) if messages else 0)
     except Exception as exc:
         LOG.warning("获取短信失败: %s", exc)
         return
@@ -175,15 +182,19 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
             new_messages.append(msg)
 
     if not new_messages:
+        LOG.info("没有新短信（last_seen_id=%s，最新id=%s）", config.last_seen_id, messages[-1].get("id") if messages else None)
         return
 
+    LOG.info("发现 %d 条新短信", len(new_messages))
     keywords = [kw.lower() for kw in config.keywords]
     last_seen = config.last_seen_id or 0
+    forwarded_count = 0
 
     for msg in new_messages:
         last_seen = max(last_seen, msg.get("id", last_seen))
         content = msg.get("content", "")
         if keywords and not any(kw in content.lower() for kw in keywords):
+            LOG.info("短信 ID %s 不匹配关键词，跳过", msg.get("id"))
             continue
 
         text = (
@@ -200,10 +211,13 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
                 text=text,
                 parse_mode=ParseMode.MARKDOWN,
             )
+            forwarded_count += 1
             LOG.info("转发短信到 %s：%s", config.target_chat_id, content)
         except Exception as exc:
             LOG.error("发送到 Telegram 失败: %s", exc)
 
+    if forwarded_count > 0:
+        LOG.info("本次轮询共转发 %d 条短信", forwarded_count)
     await state.update(last_seen_id=last_seen)
 
 
