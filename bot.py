@@ -300,13 +300,20 @@ async def handle_pending_input(
             return
         config = await state.read()
         tokens = config.sms_tokens
-        if token not in tokens:
+        is_new_token = token not in tokens
+        if is_new_token:
             tokens.append(token)
-        await state.update(sms_tokens=tokens, active_sms_token=token)
+        # 如果切换了 token，重置 last_seen_id 避免漏掉新 token 的短信
+        reset_last_seen = config.active_sms_token != token
+        update_data = {"sms_tokens": tokens, "active_sms_token": token}
+        if reset_last_seen:
+            update_data["last_seen_id"] = None
+        await state.update(**update_data)
         context.user_data.pop("mode", None)
-        await update.message.reply_text(
-            f"已添加并启用短信 token：{token}", reply_markup=main_menu_markup()
-        )
+        msg = f"已{'添加并' if is_new_token else ''}启用短信 token：{token}"
+        if reset_last_seen:
+            msg += "\n已重置 last_seen_id，将从新短信开始转发"
+        await update.message.reply_text(msg, reply_markup=main_menu_markup())
         return
 
     if mode == "set_chat_id":
@@ -349,11 +356,17 @@ async def handle_pending_input(
         if text not in config.sms_tokens:
             await update.message.reply_text("无效的 token，请重新选择。")
             return
-        await state.update(active_sms_token=text)
+        # 如果切换了 token，重置 last_seen_id 避免漏掉新 token 的短信
+        reset_last_seen = config.active_sms_token != text
+        update_data = {"active_sms_token": text}
+        if reset_last_seen:
+            update_data["last_seen_id"] = None
+        await state.update(**update_data)
         context.user_data.pop("mode", None)
-        await update.message.reply_text(
-            f"已切换短信 token：{text}", reply_markup=main_menu_markup()
-        )
+        msg = f"已切换短信 token：{text}"
+        if reset_last_seen:
+            msg += "\n已重置 last_seen_id，将从新短信开始转发"
+        await update.message.reply_text(msg, reply_markup=main_menu_markup())
         return
 
     if mode == "delete_sms_token":
@@ -368,13 +381,20 @@ async def handle_pending_input(
             return
         tokens = [t for t in tokens if t != text]
         active = state_config.active_sms_token
+        reset_last_seen = False
         if active == text:
             active = tokens[0] if tokens else None
-        await state.update(sms_tokens=tokens, active_sms_token=active)
+            reset_last_seen = True  # 删除当前 token 并切换时，重置 last_seen_id
+        update_data = {"sms_tokens": tokens, "active_sms_token": active}
+        if reset_last_seen:
+            update_data["last_seen_id"] = None
+        await state.update(**update_data)
         context.user_data.pop("mode", None)
         msg = f"已删除短信 token：{text}"
         if active:
             msg += f"\n当前启用 token：{active}"
+            if reset_last_seen:
+                msg += "\n已重置 last_seen_id，将从新短信开始转发"
         else:
             msg += "\n当前没有启用的 token。"
         await update.message.reply_text(msg, reply_markup=main_menu_markup())
