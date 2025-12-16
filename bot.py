@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -61,7 +62,7 @@ class BotConfig:
     active_sms_token: Optional[str] = None
     target_chat_id: Optional[int] = None
     keywords: List[str] = field(default_factory=list)
-    last_seen_id: Optional[int] = None
+    last_seen_time: Optional[str] = None
     poll_interval: int = 5
     forwarding_enabled: bool = False
 
@@ -172,29 +173,35 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not messages:
         return
 
-    messages.sort(key=lambda item: item.get("id", 0))
+    # 按时间排序（时间格式：2025-12-04 17:28:37，字符串比较即可）
+    messages.sort(key=lambda item: item.get("time", ""))
     new_messages = []
     for msg in messages:
-        msg_id = msg.get("id")
-        if msg_id is None:
+        msg_time = msg.get("time")
+        if not msg_time:
             continue
-        if config.last_seen_id is None or msg_id > config.last_seen_id:
+        # 如果没有记录过时间，或者这条消息的时间更新，则认为是新消息
+        if config.last_seen_time is None or msg_time > config.last_seen_time:
             new_messages.append(msg)
 
     if not new_messages:
-        LOG.info("没有新短信（last_seen_id=%s，最新id=%s）", config.last_seen_id, messages[-1].get("id") if messages else None)
+        latest_time = messages[-1].get("time") if messages else None
+        LOG.info("没有新短信（last_seen_time=%s，最新时间=%s）", config.last_seen_time, latest_time)
         return
 
     LOG.info("发现 %d 条新短信", len(new_messages))
     keywords = [kw.lower() for kw in config.keywords]
-    last_seen = config.last_seen_id or 0
+    last_seen_time = config.last_seen_time or ""
     forwarded_count = 0
 
     for msg in new_messages:
-        last_seen = max(last_seen, msg.get("id", last_seen))
+        msg_time = msg.get("time", "")
+        # 更新最后看到的时间（取最新的时间）
+        if msg_time > last_seen_time:
+            last_seen_time = msg_time
         content = msg.get("content", "")
         if keywords and not any(kw in content.lower() for kw in keywords):
-            LOG.info("短信 ID %s 不匹配关键词，跳过", msg.get("id"))
+            LOG.info("短信时间 %s 不匹配关键词，跳过", msg_time)
             continue
 
         text = (
@@ -202,7 +209,7 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
             f"ID: `{msg.get('id')}`\n"
             f"号码: {msg.get('number')}\n"
             f"接收号码: `{msg.get('simnum')}`\n"
-            f"时间: {msg.get('time')}\n"
+            f"时间: {msg_time}\n"
             f"内容: {content}"
         )
         try:
@@ -218,7 +225,7 @@ async def poll_sms(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if forwarded_count > 0:
         LOG.info("本次轮询共转发 %d 条短信", forwarded_count)
-    await state.update(last_seen_id=last_seen)
+    await state.update(last_seen_time=last_seen_time)
 
 
 def main_menu_markup() -> ReplyKeyboardMarkup:
@@ -303,16 +310,16 @@ async def handle_pending_input(
         is_new_token = token not in tokens
         if is_new_token:
             tokens.append(token)
-        # 如果切换了 token，重置 last_seen_id 避免漏掉新 token 的短信
+        # 如果切换了 token，重置 last_seen_time 避免漏掉新 token 的短信
         reset_last_seen = config.active_sms_token != token
         update_data = {"sms_tokens": tokens, "active_sms_token": token}
         if reset_last_seen:
-            update_data["last_seen_id"] = None
+            update_data["last_seen_time"] = None
         await state.update(**update_data)
         context.user_data.pop("mode", None)
         msg = f"已{'添加并' if is_new_token else ''}启用短信 token：{token}"
         if reset_last_seen:
-            msg += "\n已重置 last_seen_id，将从新短信开始转发"
+            msg += "\n已重置 last_seen_time，将从新短信开始转发"
         await update.message.reply_text(msg, reply_markup=main_menu_markup())
         return
 
@@ -356,16 +363,16 @@ async def handle_pending_input(
         if text not in config.sms_tokens:
             await update.message.reply_text("无效的 token，请重新选择。")
             return
-        # 如果切换了 token，重置 last_seen_id 避免漏掉新 token 的短信
+        # 如果切换了 token，重置 last_seen_time 避免漏掉新 token 的短信
         reset_last_seen = config.active_sms_token != text
         update_data = {"active_sms_token": text}
         if reset_last_seen:
-            update_data["last_seen_id"] = None
+            update_data["last_seen_time"] = None
         await state.update(**update_data)
         context.user_data.pop("mode", None)
         msg = f"已切换短信 token：{text}"
         if reset_last_seen:
-            msg += "\n已重置 last_seen_id，将从新短信开始转发"
+            msg += "\n已重置 last_seen_time，将从新短信开始转发"
         await update.message.reply_text(msg, reply_markup=main_menu_markup())
         return
 
@@ -384,17 +391,17 @@ async def handle_pending_input(
         reset_last_seen = False
         if active == text:
             active = tokens[0] if tokens else None
-            reset_last_seen = True  # 删除当前 token 并切换时，重置 last_seen_id
+            reset_last_seen = True  # 删除当前 token 并切换时，重置 last_seen_time
         update_data = {"sms_tokens": tokens, "active_sms_token": active}
         if reset_last_seen:
-            update_data["last_seen_id"] = None
+            update_data["last_seen_time"] = None
         await state.update(**update_data)
         context.user_data.pop("mode", None)
         msg = f"已删除短信 token：{text}"
         if active:
             msg += f"\n当前启用 token：{active}"
             if reset_last_seen:
-                msg += "\n已重置 last_seen_id，将从新短信开始转发"
+                msg += "\n已重置 last_seen_time，将从新短信开始转发"
         else:
             msg += "\n当前没有启用的 token。"
         await update.message.reply_text(msg, reply_markup=main_menu_markup())
